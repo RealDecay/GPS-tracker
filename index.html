@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPS</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+
+    <style>
+    #map { height: 350px; margin-top: 10px; }
+    button { padding: 10px; font-size: 16px; margin-right: 5px; }
+
+    #timer {
+    text-align: center;
+    font-size: 32px;
+    font-weight: bold;
+    font-family: monospace;
+    margin: 10px auto;
+    
+    /* kad veiktu dark/light mode */
+    color: #ffffff;            
+    background-color: #222222; 
+    padding: 8px 16px;         
+    border-radius: 8px;        
+    width: fit-content;        
+    }
+
+    #telemetry {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    background-color: #222222;
+    color: #ffffff;
+    padding: 10px;
+    border-radius: 8px;
+    font-family: monospace;
+    font-size: 14px;
+    margin: 10px 0;
+    text-align: left;
+    }
+    
+    
+    </style>
+
+</head>
+<body>
+
+    <div id="timer">00:00:00</div>
+
+    <div id="telemetry">
+    <div>Lat: <span id="lat-val">-</span></div>
+    <div>Lng: <span id="lng-val">-</span></div>
+    <div>Accuracy: <span id="acc-val">-</span></div>
+    <div>Speed: <span id="speed-val">-</span></div>
+    </div>
+
+    <h1>User location</h1>
+
+    <button onclick="startTracking()">Start</button>
+    <button onclick="stopTracking()">Stop</button>
+    <button onclick="resetPoints()">Reset</button>
+    <button onclick="exportPath()">Export</button>
+    
+
+    <div id="map"></div>
+
+</body>
+<script>
+const map = L.map('map'); 
+// Initializes map
+
+map.setView([0, 0], 13); 
+// Sets initial coordinates and zoom level
+
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+}).addTo(map);
+// Sets map data source and associates with map
+
+let marker, circle, zoomed;
+
+// kintamieji
+let watchId = null;
+let pathCoordinates = [];
+let pathLine = L.polyline([], {color: 'red'}).addTo(map);
+
+//timer vars
+let timerInterval = null;
+let secondsElapsed = 0;
+
+function startTracking() {
+    if (!watchId) {
+        watchId = navigator.geolocation.watchPosition(success, error, { enableHighAccuracy: true });
+    }
+
+    if (!timerInterval) {
+        timerInterval = setInterval(updateTimer, 1000);
+    }
+}
+//navigator.geolocation.watchPosition(success, error);
+
+function stopTracking() {
+    if (watchId) {
+        navigator.geolocation.clearWatch(watchId); 
+        watchId = null;
+    }
+
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+}
+
+function success(pos) {
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
+    const accuracy = pos.coords.accuracy;
+
+    //param
+    //const speedMs = pos.coords.speed;
+    const speedMs = (pos.coords.speed !== null && !isNaN(pos.coords.speed)) ? pos.coords.speed.toFixed(3) : "0.000";
+    document.getElementById("lat-val").innerText = lat.toFixed(5);
+    document.getElementById("lng-val").innerText = lng.toFixed(5);
+    document.getElementById("acc-val").innerText = Math.round(accuracy) + "m";
+    document.getElementById("speed-val").innerText = speedMs + " m/s";
+
+    // save to array ir draw polyline
+    pathCoordinates.push([lat, lng]);
+    pathLine.addLatLng([lat, lng]);
+
+    if (marker) {
+        map.removeLayer(marker);
+        map.removeLayer(circle);
+    }
+
+    marker = L.marker([lat, lng]).addTo(map);
+    circle = L.circle([lat, lng], { radius: accuracy }).addTo(map);
+
+    if (!zoomed) {
+        zoomed = map.fitBounds(circle.getBounds()); 
+    } else {
+        map.setView([lat, lng]);
+    }
+}
+
+function updateTimer() {
+    secondsElapsed++;
+
+    const hrs = Math.floor(secondsElapsed / 3600).toString().padStart(2, '0');
+    const mins = Math.floor((secondsElapsed % 3600) / 60).toString().padStart(2, '0');
+    const secs = (secondsElapsed % 60).toString().padStart(2, '0');
+
+    document.getElementById("timer").innerText = `${hrs}:${mins}:${secs}`;
+}
+
+function exportPath() {
+    if (pathCoordinates.length === 0) {
+        alert("No data");
+        return;
+    }
+    
+    // masyvas saygomas .cvs
+    let csvContent = "data:text/csv;charset=utf-8,Latitude,Longitude\n";
+    pathCoordinates.forEach(row => {
+        csvContent += row[0] + "," + row[1] + "\n";
+    });
+
+    // auto download sukurimas
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "my_gps_path.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function resetPoints() {
+    if (pathCoordinates.length === 0) {
+        alert("No data");
+        return;
+    }
+
+    pathCoordinates = [];     
+    pathLine.setLatLngs([]);  
+
+    // timer reset
+    secondsElapsed = 0;
+    document.getElementById("timer").innerText = "00:00:00";
+
+    if (!watchId && timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+
+    document.getElementById("lat-val").innerText = "-";
+    document.getElementById("lng-val").innerText = "-";
+    document.getElementById("acc-val").innerText = "-";
+    document.getElementById("speed-val").innerText = "-";
+
+}
+
+function error(err) {
+
+    if (err.code === 1) {
+        alert("Allow location access");
+    } else {
+        alert("Cannot get current location");
+    }
+
+}
+
+</script>
+</html>
